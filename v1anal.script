@@ -1,0 +1,167 @@
+var HACKSCRIPT = 'hacktemplate.script';
+var HACKWEAKEN = 'hackweaken.script';
+var GROWSCRIPT = 'grow.script'
+
+var visited = new Array();
+
+var hackables = new Array();
+
+var purchased = new Array();
+
+var best_server_to_hack = {'server': 'n00dles', 'rating': 0, 'growth': 0};
+
+function find_hackable(name, port_max) {
+    visited.push(name);
+    var servers = scan(name);
+    for(var i=0; i < servers.length; ++i) {
+        var server = servers[i];
+        if (visited.includes(server)) continue;
+        visited.push(name);
+
+
+        var serverhacklev = getServerRequiredHackingLevel(server);
+        var hacklev = getHackingLevel();
+        if (hacklev < serverhacklev) continue;
+
+        var ports = getServerNumPortsRequired(server);
+        if (ports > port_max) continue;
+
+        hackables.push({'hostname': server});
+
+        find_hackable(server, port_max);
+    }
+}
+
+function print_money() {
+    for(var i=0; i < hackables.length; ++i) {
+        var server = hackables[i];
+        var hostname = server.hostname;
+
+        server.money = getServerMaxMoney(hostname) / 1000000;
+        if (server.money == 0) continue;
+
+        // var sec = getServerMinSecurityLevel(hostname);
+        // var secactive = getServerSecurityLevel(hostname);
+        // tprint(hostname, ' money(M) ', money, ' mps effective ', money/secactive, ' mps theory ', money/sec);
+
+        server.growtime = getGrowTime(hostname) / 1000 / 60;
+        server.hacktime = getHackTime(hostname) / 1000 / 60;
+        server.weaktime = getWeakenTime(hostname) / 1000 / 60;
+        server.hacktime = Math.max(server.growtime, server.hacktime, server.weaktime);
+        server.growth = getServerGrowth(hostname);
+        server.mph = ((server.money * (server.growth/100))/server.hacktime);
+
+        server.hackanalyze = hackAnalyze(hostname);
+
+        if (best_server_to_hack['rating'] < server.mph) {
+            tprint(hostname, ' money(M) ', server.money, 
+              ' money per hacktime ', server.mph , ' hacktime ', server.hacktime);
+            tprint(hostname, ' growth rate ', server.growth, ' hackanalyze ', server.hackanalyze);
+            best_server_to_hack = {'hostname': hostname, 'rating': server.mph, 'growth': server.growth};
+        }
+    }
+}
+
+
+function exec_code() {
+    target_hack = best_server_to_hack['hostname'];
+
+    var allhostnames = new Array();
+    for(var i=0; i < hackables.length; ++i) {
+        var hostname = hackables[i];
+        allhostnames.push(hostname);
+    }
+
+    for(var i=0; i < purchased.length; ++i) {
+        var hostname = purchased[i];
+        allhostnames.push(hostname);
+    }
+
+
+    for(var i=0; i < allhostnames.length; ++i) {
+        var hostname = allhostnames[i].hostname;
+
+
+        if (scriptRunning(HACKSCRIPT, hostname))
+            scriptKill(HACKSCRIPT, hostname);
+
+        var maxram = getServerMaxRam(hostname);
+        var usedram = getServerUsedRam(hostname);
+        var freeram = maxram - usedram;
+        
+        var scriptram = getScriptRam(HACKSCRIPT);
+
+        var threads = Math.floor(freeram / scriptram);
+
+        exec(HACKSCRIPT, hostname, threads, target_hack);
+        tprint('hacking ', target_hack);
+    }
+}
+
+
+function hack_servers(port_max) {
+    for(var i=0; i < hackables.length; ++i) {
+        var hostname = hackables[i].hostname;
+        if (port_max > 0) brutessh(hostname);
+        if (port_max > 1) ftpcrack(hostname);
+        nuke(hostname);
+
+        check_backdoor(hostname)
+    }
+}
+
+function copy_code() {
+    var files = [HACKSCRIPT, HACKWEAKEN, GROWSCRIPT];
+    for(var i=0; i < hackables.length; ++i) {
+        var hostname = hackables[i].hostname;
+        scp(files, 'home', hostname);
+    }
+
+    for(var i=0; i < purchased.length; ++i) {
+        var hostname = purchased[i];
+        scp(files, 'home', hostname);
+    }
+}
+
+function find_purchased() {
+    var servers = getPurchasedServers();
+    for (var i=0; i<servers.length; ++i) {
+        purchased.push(servers[i]);
+    }
+}
+
+function get_port_max() {
+    var result = 0;
+
+    var exes = ['brutessh.exe', 'ftpcrack.exe', 'relaysmtp.exe', 'httpworm.exe', 'sqlinject.exe'];
+    for (var i=0; i < exes.length; ++i) {
+        if (fileExists(exes[i])) result++;
+    }
+
+    tprint('port max is ', result);
+
+    return result;
+}
+
+function check_backdoor(server) {
+    var server_obj = getServer(server);
+    if (server_obj.hasAdminRights && !server_obj.backdoorInstalled) {
+        tprint('server ', server, ' has NO backdoor installed!');
+    }
+}
+
+
+function main() {
+
+
+    port_max = get_port_max();
+    find_purchased();
+    find_hackable('home', port_max);
+    copy_code();
+    print_money();
+    hack_servers(port_max);
+    //exec_code('phantasy');
+    exec_code();
+}
+
+main();

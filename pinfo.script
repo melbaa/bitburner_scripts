@@ -1,0 +1,6 @@
+// pinfo.script aka purchase info
+
+// var maxram = getPurchasedServerMaxRam()
+var ram = args[0];
+var cost = getPurchasedServerCost(ram) / 1000000;
+tprint(ram, ' ', cost, 'mil')
