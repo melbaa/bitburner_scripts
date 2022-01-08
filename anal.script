@@ -18,31 +18,36 @@ var purchased = new Array();
 
 var hackable_with_extras = new Array();
 
-var best_server_to_hack = {'server': 'n00dles', 'rating': 0, 'growth': 0};
-
 var next_process_id = 0;
 
 var next_target = -1;
 
-function find_hackable(name, port_max) {
-    visited.push(name);
-    var servers = scan(name);
-    for(var i=0; i < servers.length; ++i) {
-        var server = servers[i];
-        if (visited.includes(server)) continue;
-        visited.push(name);
+var backdoor_path = new Array();
+
+function find_hackable(hostname, port_max) {
+    visited.push(hostname);
+    var hostnames_scan = scan(hostname);
+    backdoor_path.push(hostname);
+    for(var i=0; i < hostnames_scan.length; ++i) {
+        var hostname_scan = hostnames_scan[i];
+        if (visited.includes(hostname_scan)) continue;
+        visited.push(hostname_scan);
 
 
-        var serverhacklev = getServerRequiredHackingLevel(server);
+        var serverhacklev = getServerRequiredHackingLevel(hostname_scan);
         if (HACKLEVEL < serverhacklev) continue;
 
-        var ports = getServerNumPortsRequired(server);
+        var ports = getServerNumPortsRequired(hostname_scan);
         if (ports > port_max) continue;
 
-        hackables.push({'hostname': server});
 
-        find_hackable(server, port_max);
+        var server = {'hostname': hostname_scan, 'server_obj': getServer(hostname_scan)};
+        hackables.push(server);
+        hack_server(port_max, server);
+
+        find_hackable(hostname_scan, port_max);
     }
+    backdoor_path.pop();
 }
 
 function annotate_hackables() {
@@ -76,7 +81,7 @@ function annotate_hackables() {
         server.threads_needed = Math.max(hack_threads_needed, grow_threads_needed);
 
         print(hostname, ' threads needed ', server.threads_needed, ' growth ', grow_threads_needed, ' hack_t ', hack_threads_needed);
-        tprint(hostname, ' threads needed ', server.threads_needed, ' growth ', grow_threads_needed, ' hack_t ', hack_threads_needed);
+        //tprint(hostname, ' threads needed ', server.threads_needed, ' growth ', grow_threads_needed, ' hack_t ', hack_threads_needed);
 
 
 
@@ -91,13 +96,6 @@ function annotate_hackables() {
         /*
 
         server.mph = ((server.money * (server.growth/100))/server.hacktime);
-
-        if (best_server_to_hack['rating'] < server.mph) {
-            tprint(hostname, ' money(M) ', server.money, 
-              ' money per hacktime ', server.mph , ' hacktime ', server.hacktime);
-            tprint(hostname, ' growth rate ', server.growth, ' hackanalyze ', server.hackanalyze);
-            best_server_to_hack = {'hostname': hostname, 'rating': server.mph, 'growth': server.growth};
-        }
 
         */
     }
@@ -141,7 +139,7 @@ function get_hosts(allhostnames) {
             'hostname': hostname,
         };
         print(hostname, ' thread_found ', obj.thread_found);
-        tprint(hostname, ' thread_found ', obj.thread_found);
+        //tprint(hostname, ' thread_found ', obj.thread_found);
 
         result.push(obj);
     }
@@ -191,14 +189,14 @@ function exec_code() {
             target.threads_needed -= threads;
             host.thread_found -= threads;
 
-            tprint('hacking ', target.hostname, ' via ', host.hostname, ' with threads ', threads);
+            // tprint('hacking ', target.hostname, ' via ', host.hostname, ' with threads ', threads);
             exec(HACKSCRIPT, host.hostname, threads, target.hostname, get_next_process_id());
         }
     }
 }
 
 
-function hack_servers(port_max) {
+function hack_server(port_max, server) {
     /*
    * * BruteSSH.exe: 50
    * * FTPCrack.exe: 100
@@ -210,18 +208,26 @@ function hack_servers(port_max) {
    * * ServerProfiler.exe: 75
    * * AutoLink.exe: 25
    */
-    for(var i=0; i < hackables.length; ++i) {
-        var hostname = hackables[i].hostname;
-        if (port_max > 0) brutessh(hostname);
-        if (port_max > 1) ftpcrack(hostname);
-        if (port_max > 2) relaysmtp(hostname);
-        if (port_max > 3) httpworm(hostname);
-        if (port_max > 4) sqlinject(hostname);
-        
-        nuke(hostname);
+    var hostname = server.hostname;
 
-        check_backdoor(hostname)
-    }
+    /*
+    tprint(hostname);
+    tprint(server.server_obj.sshPortOpen);
+    tprint(server.server_obj.ftpPortOpen);
+    tprint(server.server_obj.smtpPortOpen);
+    tprint(server.server_obj.httpPortOpen);
+    tprint(server.server_obj.sqlPortOpen);
+    */
+
+    if (port_max > 0 && !server.server_obj.sshPortOpen) brutessh(hostname);
+    if (port_max > 1 && !server.server_obj.ftpPortOpen) ftpcrack(hostname);
+    if (port_max > 2 && !server.server_obj.smtpPortOpen) relaysmtp(hostname);
+    if (port_max > 3 && !server.server_obj.httpPortOpen) httpworm(hostname);
+    if (port_max > 4 && !server.server_obj.sqlPortOpen) sqlinject(hostname);
+    
+    nuke(hostname);
+
+    check_backdoor(server);
 }
 
 function copy_code() {
@@ -257,10 +263,16 @@ function get_port_max() {
     return result;
 }
 
-function check_backdoor(hostname) {
-    var server_obj = getServer(hostname);
+function check_backdoor(server) {
+    var server_obj = server.server_obj;
     if (server_obj.hasAdminRights && !server_obj.backdoorInstalled) {
-        tprint('server ', hostname, ' has NO backdoor installed!');
+        tprint('server ', server.hostname, ' has NO backdoor installed!');
+        var connectstr = ' ; home; ';
+        for(var i=1; i<backdoor_path.length; ++i) {
+            connectstr += 'connect ' + backdoor_path[i] + '; '
+        }
+        connectstr += 'connect ' + server.hostname + '; backdoor; '
+        tprint(connectstr);
     }
 }
 
@@ -272,7 +284,6 @@ function main() {
     find_hackable('home', port_max);
     annotate_hackables();
     copy_code();
-    hack_servers(port_max);
     exec_code();
     tprint('done');
 }
