@@ -1,6 +1,6 @@
 var on_hostname = args[0];
 var script = args[1];
 var target_hostname = args[2];
-var procid = args[3];
+var threadname = args[3];
 
-exec(script, on_hostname, 1, target_hostname, procid);
+exec(script, on_hostname, 1, target_hostname, threadname);

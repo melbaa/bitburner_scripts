@@ -1,0 +1,4 @@
+var hostname = getHostname();
+while (true) {
+	grow(hostname);
+}

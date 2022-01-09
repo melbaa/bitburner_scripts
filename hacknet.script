@@ -1,0 +1,28 @@
+function main() {
+	var money = getServerMoneyAvailable('home');
+	var cost = hacknet.getPurchaseNodeCost() + 373.791 * 1e6;
+
+	if (cost >= money) {
+		tprint('no cash. need ', nFormat(cost, "0.000a"));
+		return;
+	}
+
+	var txt = sprintf('buying for %s', nFormat(cost, "0.000a"));
+	tprint(txt);
+
+	var node = hacknet.purchaseNode();
+	tprint('level ', hacknet.upgradeLevel(node, 200));
+	tprint('core ', hacknet.upgradeCore(node, 16));
+	tprint('ram ', hacknet.upgradeRam(node, 64));
+
+	/*
+
+	var stats = hacknet.getNodeStats(0);
+	tprint(stats);
+
+	"level":200,"ram":64,"ramUsed":null,"cores":16,
+	*/
+}
+
+
+main()
