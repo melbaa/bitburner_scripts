@@ -2,27 +2,23 @@
 
 
 var HACKSCRIPT = 'hacktemplate.script';
-var HACKWEAKEN = 'hackweaken.script';
+var HACKWEAKEN = 'growweaken.script';
 var GROWSCRIPT = 'grow.script'
 
-var SCRIPTRAM;
 
 var HACKLEVEL;
 
+var visited;
 
-var visited = new Array();
-
-var hackables = new Array();
+var hackables;
 
 var PURCHASED;
 
-var hackable_with_extras = new Array();
+var hackable_with_extras;
 
-var next_process_id = 0;
+var next_process_id;
 
-var next_target = -1;
-
-var backdoor_path = new Array();
+var backdoor_path;
 
 function find_hackable(ns, hostname, port_max) {
     visited.push(hostname);
@@ -35,10 +31,16 @@ function find_hackable(ns, hostname, port_max) {
 
 
         var serverhacklev = ns.getServerRequiredHackingLevel(hostname_scan);
-        if (HACKLEVEL < serverhacklev) continue;
+        if (HACKLEVEL < serverhacklev) { 
+            ns.tprint('cant hack ', hostname_scan, ' lvl ', serverhacklev);
+            continue;
+        }
 
         var ports = ns.getServerNumPortsRequired(hostname_scan);
-        if (ports > port_max) continue;
+        if (ports > port_max) {
+            ns.tprint('cant hack ', hostname_scan, ' ports ', ports);
+            continue;
+        }
 
         var server_obj = ns.getServer(hostname_scan);
         if (server_obj.purchasedByPlayer) continue;
@@ -72,14 +74,13 @@ function annotate_hackables(ns) {
         // how many threads to hack for a target percent
         server.hackanalyze = ns.hackAnalyze(hostname);
         ns.print('hackanalize ', server.hackanalyze);
-        var hack_threads_needed = Math.floor((0.5 / server.hackanalyze) * (server.hacktime_real / 20) ) || 1;
+        var hack_threads_needed = Math.floor((0.5 / server.hackanalyze)) || 1;
 
         // n threads needed to grow in hacktime
-        // our goal is to grow in 60 sec
         server.growth = ns.getServerGrowth(hostname);
         server.growthanalyze = ns.growthAnalyze(hostname, 2);
         ns.print('growthanalyze ', server.growthanalyze);
-        var grow_threads_needed = Math.floor(server.growthanalyze * (server.hacktime / 30)) || 1;
+        var grow_threads_needed = Math.floor(server.growthanalyze) || 1;
         server.threads_needed = Math.max(hack_threads_needed, grow_threads_needed);
 
         ns.print(hostname, ' threads needed ', server.threads_needed, ' growth ', grow_threads_needed, ' hack_t ', hack_threads_needed);
@@ -108,11 +109,7 @@ function get_next_process_id() {
     return next_process_id;
 }
 
-function get_next_target() {
-    next_target++;
-    next_target = next_target % hackable_with_extras.length;
-    return hackable_with_extras[next_target];
-}
+
 
 function get_all_targets() {
     return hackable_with_extras.sort(function(a, b){
@@ -125,22 +122,30 @@ function get_all_targets() {
 }
 
 
-function get_hosts(ns, allhostnames) {
+function get_hosts(ns, allhostnames, script, drain) {
+    // when draining, dont kill scripts, use remaining ram
     var result = new Array();
     for (var i=0; i<allhostnames.length; ++i) {
         var hostname = allhostnames[i];
         var maxram = ns.getServerMaxRam(hostname);
+        var usedram = ns.getServerUsedRam(hostname);
+        var ram;
+        if (drain) {
+            ram = maxram - usedram;
+        } else {
+            ram = maxram;
+        }
         // var usedram = getServerUsedRam(hostname);
         // var freeram = maxram - usedram;
+        var scriptram = ns.getScriptRam(script);
 
         var obj = {
             'maxram': maxram,
+            'ram': ram,
             //'usedram': usedram,
             //'freeram': freeram,
-            //'thread_found': Math.floor(freeram / SCRIPTRAM),
-            'thread_found': Math.floor(maxram / SCRIPTRAM),
+            'thread_found': Math.floor(ram / scriptram),
             'hostname': hostname,
-            'scripts_killed': 0,
         };
         ns.print(hostname, ' thread_found ', obj.thread_found);
         //tprint(hostname, ' thread_found ', obj.thread_found);
@@ -160,7 +165,6 @@ function find_host_with_threads(ns, hosts) {
     while (hosts.length) {
         var host = hosts[hosts.length - 1];
         if (host.thread_found > 0) {
-            kill_scripts_once(ns, host);
             return host;
         }
         hosts.pop();
@@ -169,12 +173,32 @@ function find_host_with_threads(ns, hosts) {
 }
 
 function kill_scripts_once(ns, host) {
-    if (host.scripts_killed) return;
 
     var hostname = host.hostname;
-    if (ns.scriptRunning(HACKSCRIPT, hostname))
-        ns.scriptKill(HACKSCRIPT, hostname);
-    host.scripts_killed = 1;
+    for(let script of [HACKSCRIPT, GROWSCRIPT]) {
+        if (ns.scriptRunning(script, hostname))
+            ns.scriptKill(script, hostname);
+    }
+}
+
+function target_host(ns, target, allhosts, scriptname, drain) {
+    // when draining, use all available host threads
+    while (target.threads_needed > 0 || drain) {
+        var host = find_host_with_threads(ns, allhosts);
+        if (host === null) break;
+        var threads;
+        if (drain) {
+            threads = host.thread_found;
+        } else {
+            threads = Math.min(target.threads_needed, host.thread_found);
+        }
+
+        target.threads_needed -= threads;
+        host.thread_found -= threads;
+
+        //ns.tprint('hacking ', target.hostname, ' via ', host.hostname, ' with threads ', threads);
+        ns.exec(scriptname, host.hostname, threads, target.hostname, threads, get_next_process_id());
+    }
 }
 
 function exec_code(ns) {
@@ -191,32 +215,34 @@ function exec_code(ns) {
     }
 
 
-    let allhosts = get_hosts(ns, allhostnames);
+
+    let allhosts = get_hosts(ns, allhostnames, HACKSCRIPT, false);
+
+
+    for(let host of allhosts) {
+        kill_scripts_once(ns, host);
+    }
 
     var alltargets = get_all_targets();
     for (var i=0; i < alltargets.length; ++i) {
         var target = alltargets[i];
         ns.print('looking at target ', target.hostname, ' ', i, ' / ', alltargets.length);
-
-        while (target.threads_needed > 0) {
-            var host = find_host_with_threads(ns, allhosts);
-            if (host === null) break;
-            var threads = Math.min(target.threads_needed, host.thread_found);
-
-            target.threads_needed -= threads;
-            host.thread_found -= threads;
-
-            // tprint('hacking ', target.hostname, ' via ', host.hostname, ' with threads ', threads);
-            ns.exec(HACKSCRIPT, host.hostname, threads, target.hostname, threads, get_next_process_id());
-        }
+        target_host(ns, target, allhosts, HACKSCRIPT, false);
     }
 
 
     // drain remaining unused hosts, if any
-    var host = find_host_with_threads(ns, allhosts);
-    while (host !== null) {
-        host.thread_found = 0;
-        host = find_host_with_threads(ns, allhosts);
+    // point to hardest server and just grow and weaken
+    let allhostsgrow = get_hosts(ns, allhostnames, GROWSCRIPT, true);
+    let ignore = ['foodnstuff', 'sigma-cosmetics'];
+    for(let i=alltargets.length - 1; i >= 0; --i) {
+        var target = alltargets[i];
+        ns.tprint('drain??? ', target.hostname, ' hacktime ', target.hacktime)
+        if (target.hacktime <= 60 && !ignore.includes(target.hostname)) {
+            ns.tprint('drain target ', target.hostname);
+            target_host(ns, target, allhostsgrow, GROWSCRIPT, true);
+            break;
+        }
     }
 }
 
@@ -249,8 +275,11 @@ function hack_server(ns, port_max, server) {
     if (port_max > 2 && !server.server_obj.smtpPortOpen) ns.relaysmtp(hostname);
     if (port_max > 3 && !server.server_obj.httpPortOpen) ns.httpworm(hostname);
     if (port_max > 4 && !server.server_obj.sqlPortOpen) ns.sqlinject(hostname);
-    
-    ns.nuke(hostname);
+    if (!server.server_obj.hasAdminRights) {
+        ns.tprint('nuking ', hostname);
+        ns.nuke(hostname);
+        server.server_obj.hasAdminRights = true;
+    }
 
     check_backdoor(ns, server);
 }
@@ -283,11 +312,14 @@ function get_port_max(ns) {
 }
 
 function check_backdoor(ns, server) {
+    //ns.tprint('checking for backdoors in ', server.hostname)
     var server_obj = server.server_obj;
     if (!server_obj.purchasedByPlayer && server_obj.hasAdminRights && !server_obj.backdoorInstalled) {
-        ns.tprint('server ', server.hostname, ' has NO backdoor installed!');
-        var connectstr = ' ; home; ';
-        for(var i=1; i<backdoor_path.length; ++i) {
+        var connectstr = ns.sprintf('server %s has NO backdoor installed! ', server.hostname);
+        connectstr += '; home; ';
+        // idea: we can connect directly from the last backdoor to the next server
+        let start = Math.max(1, backdoor_path.length-1);
+        for(var i=start; i<backdoor_path.length; ++i) {
             connectstr += 'connect ' + backdoor_path[i] + '; '
         }
         connectstr += 'connect ' + server.hostname + '; backdoor; '
@@ -297,8 +329,12 @@ function check_backdoor(ns, server) {
 
 /** @param {NS} ns **/
 export async function main(ns) {
+    next_process_id = 0;
+    visited = new Array();
+    hackables = new Array();
+    hackable_with_extras = new Array();
+    backdoor_path = new Array();
 
-    SCRIPTRAM = ns.getScriptRam(HACKSCRIPT);
     HACKLEVEL = ns.getHackingLevel();
 
     let port_max = get_port_max(ns);
@@ -308,5 +344,6 @@ export async function main(ns) {
     annotate_hackables(ns);
     await copy_code(ns);
     exec_code(ns);
+    //await ns.sleep(2000);
     ns.tprint('done');
 }

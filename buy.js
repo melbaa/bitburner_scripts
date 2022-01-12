@@ -12,12 +12,15 @@ export async function main(ns) {
 		ram *= 2;
 		cost = ns.getPurchasedServerCost(ram);
 	}
+	var nextcost = cost;
 	ram /= 2;
 	cost = ns.getPurchasedServerCost(ram);
+	var costfmt = ns.nFormat(cost, "0.000a")
+	var nextcostfmt = ns.nFormat(nextcost, "0.000a")
 
 	var allow = false;
 	if (args.length == 0) {
-		var promptxt = ns.sprintf('purchase server with %d ram for $%s?', ram, ns.nFormat(cost, "0.000a"));
+		var promptxt = ns.sprintf('purchase server with %d ram for $%s? next is %s', ram, costfmt, nextcostfmt);
 		ns.tprint(promptxt)
 	}
 	else if (args.length == 1 && (args[0] == 'y' || args[0] == 'yes' || args[0] == '1')) {
@@ -52,5 +55,5 @@ export async function main(ns) {
 		if (!ns.serverExists(name)) break;
 	}
 	
-	ns.tprint('buying ', ns.purchaseServer(name, ram));
+	ns.tprint('buying ', ns.purchaseServer(name, ram), ' for ', costfmt);
 }
